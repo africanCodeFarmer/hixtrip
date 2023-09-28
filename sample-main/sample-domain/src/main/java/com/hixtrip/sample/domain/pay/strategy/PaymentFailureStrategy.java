@@ -26,9 +26,6 @@ public class PaymentFailureStrategy implements PayCallStrategy {
     @Autowired
     private OrderRepository orderRepository;
 
-    @Autowired
-    private RedissonClient redissonClient;
-
     @Override
     public void execute(String orderId) {
         CommandPay commandPay = CommandPay.builder()
@@ -45,27 +42,12 @@ public class PaymentFailureStrategy implements PayCallStrategy {
             throw new RuntimeException("订单不存在");
         }
 
-        RLock lock = redissonClient.getLock(InventoryConstants.LOCK_PREFIX + order.getSkuId());
-        boolean hasLock = false;
-        try {
-            hasLock = lock.tryLock(10, TimeUnit.MILLISECONDS);
-            if (!hasLock) {
-                throw new RuntimeException("当前访问量过大，请稍后重试");
-            }
-
-            Inventory inventory = inventoryDomainService.getInventory(order.getSkuId());
-            if (inventory != null) {
-                inventory.setSellableQuantity(inventory.getSellableQuantity() + order.getAmount());
-                inventory.setWithholdingQuantity(inventory.getWithholdingQuantity() - order.getAmount());
-                inventoryDomainService.changeInventory(inventory.getSkuId(), inventory.getSellableQuantity(), inventory.getWithholdingQuantity(), inventory.getOccupiedQuantity());
-            }
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-            throw new RuntimeException(e.getMessage());
-        } finally {
-            if (hasLock) {
-                lock.unlock();
-            }
+        Inventory inventory = inventoryDomainService.getInventory(order.getSkuId());
+        if (inventory != null) {
+            inventory.setSellableQuantity(inventory.getSellableQuantity() + order.getAmount());
+            inventory.setWithholdingQuantity(inventory.getWithholdingQuantity() - order.getAmount());
+            inventoryDomainService.changeInventory(inventory.getSkuId(), inventory.getSellableQuantity(), inventory.getWithholdingQuantity(), inventory.getOccupiedQuantity());
         }
+
     }
 }

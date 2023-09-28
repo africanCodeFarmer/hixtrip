@@ -35,9 +35,6 @@ public class OrderServiceImpl implements OrderService {
     @Autowired
     private PayCallStrategyContext payCallStrategyContext;
 
-    @Autowired
-    private RedissonClient redissonClient;
-
     @Transactional
     @Override
     public String order(CommandOderCreateDTO commandOderCreateDTO) {
@@ -48,31 +45,15 @@ public class OrderServiceImpl implements OrderService {
 
         //扣减库存 (只在缓存实现)
         //首先检查可售库存是否大于等于购买数量
-        RLock lock = redissonClient.getLock(InventoryConstants.LOCK_PREFIX + skuId);
-        boolean hasLock = false;
-        try {
-            hasLock = lock.tryLock(10, TimeUnit.MILLISECONDS);
-            if (!hasLock) {
-                throw new RuntimeException("当前访问量过大，请稍后重试");
-            }
-
-            Inventory inventory = inventoryDomainService.getInventory(skuId);
-            if (inventory == null || inventory.getSellableQuantity() <= 0 || inventory.getSellableQuantity() < commandOderCreateDTO.getAmount()) {
-                throw new RuntimeException("可售库存不足");
-            }
-
-            //将购买数量从可售库存中减去，并将减去的数量记录到预占库存中。
-            inventory.setSellableQuantity(inventory.getSellableQuantity() - commandOderCreateDTO.getAmount());
-            inventory.setWithholdingQuantity(inventory.getWithholdingQuantity() + commandOderCreateDTO.getAmount());
-            inventoryDomainService.changeInventory(inventory.getSkuId(), inventory.getSellableQuantity(), inventory.getWithholdingQuantity(), inventory.getOccupiedQuantity());
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-            throw new RuntimeException(e.getMessage());
-        } finally {
-            if (hasLock) {
-                lock.unlock();
-            }
+        Inventory inventory = inventoryDomainService.getInventory(skuId);
+        if (inventory == null || inventory.getSellableQuantity() <= 0 || inventory.getSellableQuantity() < commandOderCreateDTO.getAmount()) {
+            throw new RuntimeException("可售库存不足");
         }
+
+        //将购买数量从可售库存中减去，并将减去的数量记录到预占库存中。
+        inventory.setSellableQuantity(inventory.getSellableQuantity() - commandOderCreateDTO.getAmount());
+        inventory.setWithholdingQuantity(inventory.getWithholdingQuantity() + commandOderCreateDTO.getAmount());
+        inventoryDomainService.changeInventory(inventory.getSkuId(), inventory.getSellableQuantity(), inventory.getWithholdingQuantity(), inventory.getOccupiedQuantity());
 
         //生成订单
         Order order = new Order();
